@@ -35,8 +35,11 @@ Hardware:
 #include "config.h"
 #include <FlashStorage.h>
 #include "BoardData.h"
+#include "circbuffer.h"
 
 MPU9250_DMP imu; // Create an instance of the MPU9250_DMP class
+BoardData databufferbackingarray[512]; //Keep 2^10 previous iterations of data in memory, for launch detect and whatnot
+CircBuffer<BoardData> databuffer(databufferbackingarray, 512);
 
 /////////////////////////////
 // Logging Control Globals //

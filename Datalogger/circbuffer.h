@@ -1,8 +1,8 @@
-#ifndef RINGBUFFER_H_INCLUDED
-#define RINGBUFFER_H_INCLUDED
+#ifndef CircBuffer_H_INCLUDED
+#define CircBuffer_H_INCLUDED
 
-template <class T>
-class RingBuffer
+template <typename T>
+class CircBuffer
 {
   private:
     uint16_t array_length;
@@ -10,15 +10,16 @@ class RingBuffer
     uint16_t tail;
     T* buffer;
   public:
-    RingBuffer(T* backing_array, uint16_t backing_array_length);
+    CircBuffer(T* backing_array, uint16_t backing_array_length);
     void write(T* data, uint16_t length);
-    T* read(T* dest, uint16_t length);
+    void read(T* dest, uint16_t length);
     void delete_oldest(uint16_t length);
     T get_nth(uint16_t index);
-    uint16_t length();
-}
+    uint16_t length(void);
+};
 
-RingBuffer::RingBuffer(T* backing_array, uint16_t backing_array_length)
+template <class T>
+CircBuffer<T>::CircBuffer(T* backing_array, uint16_t backing_array_length)
 {
   buffer = backing_array;
   array_length = backing_array_length;
@@ -26,9 +27,9 @@ RingBuffer::RingBuffer(T* backing_array, uint16_t backing_array_length)
   tail = 0;
 }
 
-RingBuffer::length()
-{
-  /*  Returns the number of bytes of data currently stored in the RingBuffer pointed to by its argument
+template <typename T>
+uint16_t CircBuffer<T>::length(void)
+  /*  Returns the number of bytes of data currently stored in the CircBuffer pointed to by its argument
   The return value will always be greater than or equal to 0
   And less than or equal to buffer->array_length
 */
@@ -45,7 +46,8 @@ RingBuffer::length()
   }
 }
 
-RingBuffer::write(T* data, uint16_t length)
+template <typename T>
+void CircBuffer<T>::write(T* data, uint16_t length)
 /* Adds length bytes, taken from the data argument, to the end of buffer */
 // Author: William Hankins
 {
@@ -69,7 +71,8 @@ RingBuffer::write(T* data, uint16_t length)
   } // end for
 }
 
-RingBuffer::read((T* dest, uint16_t length))
+template <typename T>
+void CircBuffer<T>::read(T* dest, uint16_t length)
 /*  Reads length bytes of data from the bottom of buffer.
   dest - resulting data will be stored there. Must be at least length bytes long
   length - number of bytes to be read
@@ -98,7 +101,8 @@ RingBuffer::read((T* dest, uint16_t length))
     return 0;
 }
 
-void RingBuffer::delete_oldest(uint16_t length)
+template <typename T>
+void CircBuffer<T>::delete_oldest(uint16_t length)
 /*  Deletes data from the ring buffer
   All it really has to do is move buffer->tail up length bytes or until one byte below buffer->head, whichever is lower
 */
@@ -115,8 +119,9 @@ void RingBuffer::delete_oldest(uint16_t length)
   }
 }
 
-T RingBuffer::get_nth(uint16_t index)
-//Returns the nth newest value in the RingBuffer
+template <typename T>
+T CircBuffer<T>::get_nth(uint16_t index)
+//Returns the nth newest value in the CircBuffer
 {
   //index = 0: gets the newest value
   //index = 1: gets the 2nd-newest value
@@ -132,4 +137,4 @@ T RingBuffer::get_nth(uint16_t index)
     return buffer[array_length - 1 - index + head];
 }
 
-#endif RINGBUFFER_H_INCLUDED
+#endif CircBuffer_H_INCLUDED
