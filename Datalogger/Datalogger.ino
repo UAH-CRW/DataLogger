@@ -34,6 +34,7 @@ Hardware:
 // to adjust specific parameters of the IMU
 #include "config.h"
 #include <FlashStorage.h>
+#include "SparkFun_MS5637_Arduino_Library.h"
 #include "BoardData.h"
 #include "circbuffer.h"
 
@@ -54,6 +55,8 @@ unsigned short fifoRate = DMP_SAMPLE_RATE;
 bool sdCardPresent = false; // Keeps track of if SD card is plugged in
 String logFileName; // Active logging file
 String logFileBuffer; // Buffer for logged data. Max is set in config
+
+MS5637 psensor;
 
 ///////////////////////
 // LED Blink Control //
@@ -88,6 +91,12 @@ void setup()
     // Get the next, available log file name
     logFileName = nextLogFile(); 
   }
+
+  if (psensor.begin() == false)
+  {
+    Serial.println("MS5637 sensor did not respond. Please check wiring.");
+    while(1);
+  }
 }
 
 void loop()
@@ -120,9 +129,9 @@ void logIMUData(void)
 {
   //String imuLog = ""; //String(imu.time) + "\n"; // Create a fresh line to log
   char buff[1024];
-  long press = 0;
+  long press = (float)(psensor.getPressure() * 100);
 
-  snprintf(buff, 1024, "%ld,%i,%i,%i,%i,%i,%i,%i,%i,%i,%l,%l,%l,%l,%l\n", imu.time,
+  snprintf(buff, 1024, "%ld,%i,%i,%i,%i,%i,%i,%i,%i,%i,%ld,%ld,%ld,%ld,%ld\n", imu.time,
                 imu.ax, imu.ay, imu.az,
                 imu.gx, imu.gy, imu.gz,
                 imu.mx, imu.my, imu.mz,
@@ -161,6 +170,8 @@ void logIMUData(void)
   bd.gyro = (SensorData){.X = imu.gx, .Y = imu.gy, .Z = imu.gz};
   bd.mag = (SensorData){.X = imu.mx, .Y = imu.my, .Z = imu.mz};
   bd.pressure = 0; //No pressure
+
+  databuffer.write(&bd, 1);
 
   //if (enableSerialLogging)  // If serial port logging is enabled
   LOG_PORT.print(imuLog); // Print log line to serial port
