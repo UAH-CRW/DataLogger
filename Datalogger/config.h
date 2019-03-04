@@ -31,13 +31,13 @@
 // Note: Some of these params can be overwritten using serial
 //  commands. These are just defaults on initial programming
 #define DMP_SAMPLE_RATE           200 // Logging/DMP sample rate(4-200 Hz)
-#define IMU_COMPASS_SAMPLE_RATE   200 // Compass sample rate (4-100 Hz)
-#define IMU_AG_SAMPLE_RATE        200 // Accel/gyro sample rate Must be between 4Hz and 1kHz
+#define IMU_COMPASS_SAMPLE_RATE   100 // Compass sample rate (4-100 Hz)
+#define IMU_AG_SAMPLE_RATE        500 // Accel/gyro sample rate Must be between 4Hz and 1kHz
 #define IMU_GYRO_FSR              2000 // Gyro full-scale range (250, 500, 1000, or 2000)
 #define IMU_ACCEL_FSR             16 // Accel full-scale range (2, 4, 8, or 16)
-#define IMU_AG_LPF                42 // Accel/Gyro LPF corner frequency (5, 10, 20, 42, 98, or 188 Hz)
+#define IMU_AG_LPF                188 // Accel/Gyro LPF corner frequency (5, 10, 20, 42, 98, or 188 Hz)
 #define ENABLE_GYRO_CALIBRATION   true
-#define COMPASS_ENABLED           false
+#define COMPASS_ENABLED           true
 
 ///////////////////////
 // SD Logging Config //
@@ -45,7 +45,7 @@
 #define ENABLE_SD_LOGGING         true // Default SD logging (can be changed via serial menu)
 #define LOG_FILE_INDEX_MAX        999 // Max number of "logXXX.txt" files
 #define LOG_FILE_PREFIX           "log"  // Prefix name for log files
-#define LOG_FILE_SUFFIX           "txt"  // Suffix name for log files
+#define LOG_FILE_SUFFIX           "bin"  // Suffix name for log files
 #define SD_MAX_FILE_SIZE          5000000 // 5MB max file size, increment to next file before surpassing
 #define SD_LOG_WRITE_BUFFER_SIZE  1024 // Experimentally tested to produce 100Hz logs
 

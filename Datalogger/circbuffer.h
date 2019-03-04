@@ -95,10 +95,10 @@ void CircBuffer<T>::read(T* dest, uint16_t length)
       index++;
     }
   }
-  if (length > this->length())
+  /*if (length > this->length())
     return 1;
   else
-    return 0;
+    return 0;*/
 }
 
 template <typename T>

@@ -10,6 +10,7 @@ typedef struct {
 } SensorData;
 
 typedef struct {
+  uint8_t start_char = '>';
 	uint32_t time;
 	SensorData accel;
 	SensorData gyro;

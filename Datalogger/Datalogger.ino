@@ -37,9 +37,19 @@ Hardware:
 #include "SparkFun_MS5637_Arduino_Library.h"
 #include "BoardData.h"
 #include "circbuffer.h"
+#include "sparkfun_mpl31125.h"
+#include <Wire.h>
+
+
+
+#define LOOP_TIME 2 //ms
+uint32_t last_loop_start = 0;
+uint32_t lastlooplogged = 0;
+
+bool sdLogBoardData(BoardData* bd, uint16_t count);
 
 MPU9250_DMP imu; // Create an instance of the MPU9250_DMP class
-BoardData databufferbackingarray[512]; //Keep 2^10 previous iterations of data in memory, for launch detect and whatnot
+BoardData databufferbackingarray[512]; //Keep 2^9 previous iterations of data in memory, for launch detect and whatnot
 CircBuffer<BoardData> databuffer(databufferbackingarray, 512);
 
 /////////////////////////////
@@ -57,12 +67,22 @@ String logFileName; // Active logging file
 String logFileBuffer; // Buffer for logged data. Max is set in config
 
 MS5637 psensor;
+File logFile;
+
+bool readingPressure = false;
 
 ///////////////////////
 // LED Blink Control //
 ///////////////////////
 //bool ledState = false;
 uint32_t lastBlink = 0;
+
+int pin_ovf_led = 13;  // debug pin for overflow led 
+int pin_mc0_led = 5;  // debug pin for compare led 
+unsigned int loop_count = 0;
+unsigned int irq_ovf_count = 0;
+
+
 void blinkLED()
 {
   static bool ledState = false;
@@ -70,17 +90,137 @@ void blinkLED()
   ledState = !ledState;
 }
 
+// These are the two I2C functions in this sketch.
+byte IIC_Read(byte regAddr)
+{
+  // This function reads one byte over IIC
+  Wire.beginTransmission(MPL3115A2_ADDRESS);
+  Wire.write(regAddr);  // Address of CTRL_REG1
+  Wire.endTransmission(false); // Send data to I2C dev with option for a repeated start. THIS IS NECESSARY and not supported before Arduino V1.0.1!
+  Wire.requestFrom(MPL3115A2_ADDRESS, 1); // Request the data...
+  return Wire.read();
+}
+
+void IIC_Write(byte regAddr, byte value)
+{
+  // This function writes one byto over IIC
+  Wire.beginTransmission(MPL3115A2_ADDRESS);
+  Wire.write(regAddr);
+  Wire.write(value);
+  Wire.endTransmission(true);
+}
+
+void TC3_Handler()
+{
+  TcCount16* TC = (TcCount16*) TC3; // get timer struct
+  if (TC->INTFLAG.bit.OVF == 1) {  // A overflow caused the interrupt
+    digitalWrite(pin_ovf_led, irq_ovf_count % 2); // for debug leds
+    digitalWrite(pin_mc0_led, HIGH); // for debug leds
+    TC->INTFLAG.bit.OVF = 1;    // writing a one clears the flag ovf flag
+    irq_ovf_count++;                 // for debug leds
+  }
+  
+  if (TC->INTFLAG.bit.MC0 == 1) {  // A compare to cc0 caused the interrupt
+    digitalWrite(pin_mc0_led, LOW);  // for debug leds
+    TC->INTFLAG.bit.MC0 = 1;    // writing a one clears the flag ovf flag
+  
+    //while (!imu.dataReady()); //Wait until new IMU data is available
+    imu.update(UPDATE_ACCEL | UPDATE_GYRO);
+    blinkLED();
+    // If enabled, read from the compass.
+    if (COMPASS_ENABLED)
+    {
+      imu.updateCompass();
+    }
+    //if (COMPASS_ENABLED && imu.updateCompass() != INV_SUCCESS)
+    //  return; // If compass read fails (uh, oh) return to top
+  
+    //psensor.takeNextStep();
+    
+    //String imuLog = ""; //String(imu.time) + "\n"; // Create a fresh line to log
+    //BoardData object for binary data logging
+    BoardData bd;
+    bd.pressure = 0; //Default to having no pressure
+    /*if (!readingPressure) //psensor.hasNewData)
+    {
+  //    bd.pressure = psensor.pressure;
+      //psensor.hasNewData = false;
+      if(IIC_Read(MPL_STATUS) & (1<<2) == 0)
+      {
+        byte tempSetting = IIC_Read(CTRL_REG1); //Read current settings
+        tempSetting &= ~(1<<1); //Clear OST bit
+        IIC_Write(CTRL_REG1, tempSetting);
+      
+        tempSetting = IIC_Read(CTRL_REG1); //Read current settings to be safe
+        tempSetting |= (1<<1); //Set OST bit
+        IIC_Write(CTRL_REG1, tempSetting);
+        readingPressure = true;
+      }
+    }
+    else if (readingPressure)
+    {
+      if (IIC_Read(MPL_STATUS) & (1<<2))
+      {
+        //Time to read in pressure value
+        Wire.beginTransmission(MPL3115A2_ADDRESS);
+        Wire.write(OUT_P_MSB);  // Address of data to get
+        Wire.endTransmission(false); // Send data to I2C dev with option for a repeated start. THIS IS NECESSARY and not supported before Arduino V1.0.1!
+        byte msb, csb, lsb;
+        msb = Wire.read();
+        csb = Wire.read();
+        lsb = Wire.read();
+
+        byte tempSetting = IIC_Read(CTRL_REG1); //Read current settings
+        tempSetting &= ~(1<<1); //Clear OST bit
+        IIC_Write(CTRL_REG1, tempSetting);
+      
+        tempSetting = IIC_Read(CTRL_REG1); //Read current settings to be safe
+        tempSetting |= (1<<1); //Set OST bit
+        IIC_Write(CTRL_REG1, tempSetting);
+        
+        bd.pressure = (long)msb<<16 | (long)csb<<8 | (long)lsb;
+      }
+    }*/
+  
+    //Populate BoardData object
+    bd.time = millis();
+    bd.accel = (SensorData){.X = imu.ax, .Y = imu.ay, .Z = imu.az};
+    bd.gyro = (SensorData){.X = imu.gx, .Y = imu.gy, .Z = imu.gz};
+    bd.mag = (SensorData){.X = imu.mx, .Y = imu.my, .Z = imu.mz};
+  
+    databuffer.write(&bd, 1);
+  }
+}
+
 void setup()
 {
+
+  /*delay(1000); //XXX: debug. Makes sure things can be reprogrammed
+  blinkLED();
+  delay(250);*/
+  
   // Initialize LED, interrupt input, and serial port.
   // LED defaults to off:
   initHardware(); 
+
+  /*while (1)
+  {
+    blinkLED();
+    LOG_PORT.println("In the loop");
+    delay(750);
+  }*/
 
   // Initialize the MPU-9250. Should return true on success:
   if ( !initIMU() ) 
   {
     LOG_PORT.println("Error connecting to MPU-9250");
-    while (1) ; // Loop forever if we fail to connect
+    while (1)
+    {
+      LOG_PORT.println("IMU failed to respond. This board is probably toast");
+      blinkLED();
+      delay(200);
+      // Loop forever if we fail to connect
+    }
     // LED will remain off in this state.
   }
 
@@ -92,103 +232,102 @@ void setup()
     logFileName = nextLogFile(); 
   }
 
-  if (psensor.begin() == false)
-  {
-    Serial.println("MS5637 sensor did not respond. Please check wiring.");
-    while(1);
-  }
+  // Open the current file name:
+   logFile = SD.open(logFileName, FILE_WRITE);
+
+
+     pinMode(pin_ovf_led, OUTPUT);   // for debug leds
+  digitalWrite(pin_ovf_led, LOW); // for debug leds
+  pinMode(pin_mc0_led, OUTPUT);   // for debug leds
+  digitalWrite(pin_mc0_led, LOW); // for debug leds
+  SerialUSB.begin(9600);
+
+  
+  // Enable clock for TC 
+  REG_GCLK_CLKCTRL = (uint16_t) (GCLK_CLKCTRL_CLKEN | GCLK_CLKCTRL_GEN_GCLK0 | GCLK_CLKCTRL_ID ( GCM_TCC2_TC3 ) ) ;
+  while ( GCLK->STATUS.bit.SYNCBUSY == 1 ); // wait for sync 
+
+  // The type cast must fit with the selected timer mode 
+  TcCount16* TC = (TcCount16*) TC3; // get timer struct
+
+  TC->CTRLA.reg &= ~TC_CTRLA_ENABLE;   // Disable TCx
+  while (TC->STATUS.bit.SYNCBUSY == 1); // wait for sync 
+
+  TC->CTRLA.reg |= TC_CTRLA_MODE_COUNT16;  // Set Timer counter Mode to 16 bits
+  while (TC->STATUS.bit.SYNCBUSY == 1); // wait for sync 
+  TC->CTRLA.reg |= TC_CTRLA_WAVEGEN_NFRQ; // Set TC as normal Normal Frq
+  while (TC->STATUS.bit.SYNCBUSY == 1); // wait for sync 
+
+  TC->CTRLA.reg |= TC_CTRLA_PRESCALER_DIV1;   // Set perscaler
+  while (TC->STATUS.bit.SYNCBUSY == 1); // wait for sync 
+  
+  // TC->PER.reg = 0xFF;   // Set counter Top using the PER register but the 16/32 bit timer counts allway to max  
+  // while (TC->STATUS.bit.SYNCBUSY == 1); // wait for sync 
+
+  TC->CC[0].reg = 0xFFF;
+  while (TC->STATUS.bit.SYNCBUSY == 1); // wait for sync 
+  
+  // Interrupts 
+  TC->INTENSET.reg = 0;              // disable all interrupts
+  TC->INTENSET.bit.OVF = 1;          // enable overfollow
+  TC->INTENSET.bit.MC0 = 1;          // enable compare match to CC0
+
+  // Enable InterruptVector
+  NVIC_EnableIRQ(TC3_IRQn);
+
+  // Enable TC
+  TC->CTRLA.reg |= TC_CTRLA_ENABLE;
+  while (TC->STATUS.bit.SYNCBUSY == 1); // wait for sync 
+   /*while (1)
+   {
+    //blinkLED();
+    LOG_PORT.println("In the setup end loop!");
+    delay(100);
+   }*/
 }
 
 void loop()
 {
+  while (millis() < last_loop_start + LOOP_TIME); //Pace execution time to desired sample rate
+  last_loop_start = millis();
+  
   // The loop constantly checks for new serial input:
-  if (LOG_PORT.available())
+  /*if (LOG_PORT.available())
   {
     // If new input is available on serial port
     parseSerialInput(LOG_PORT.read()); // parse it
-  }
+  }*/
 
-  // Then check IMU for new data, and log it
-  if ( !imu.fifoAvailable() ) // If no new data is available
-    return;                   // return to the top of the loop
-
-  // Read from the digital motion processor's FIFO
-  if ( imu.dmpUpdateFifo() != INV_SUCCESS )
-    return; // If that fails (uh, oh), return to top
-
-  // If enabled, read from the compass.
-  if (COMPASS_ENABLED && imu.updateCompass() != INV_SUCCESS)
-    return; // If compass read fails (uh, oh) return to top
-
+  
   // If logging (to either UART and SD card) is enabled
   //if ( enableSerialLogging || enableSDLogging)
-  logIMUData(); // Log new data  
+  logIMUData(); // Log new data
 }
 
 void logIMUData(void)
 {
-  //String imuLog = ""; //String(imu.time) + "\n"; // Create a fresh line to log
-  char buff[1024];
-  long press = (float)(psensor.getPressure() * 100);
-
-  snprintf(buff, 1024, "%ld,%i,%i,%i,%i,%i,%i,%i,%i,%i,%ld,%ld,%ld,%ld,%ld\n", imu.time,
-                imu.ax, imu.ay, imu.az,
-                imu.gx, imu.gy, imu.gz,
-                imu.mx, imu.my, imu.mz,
-                imu.qw, imu.qx, imu.qy, imu.qz, press);
   
-  /*snprintf(buff, 1024, "%ld,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%l\n", imu.time,
-                imu.calcAccel(imu.ax), imu.calcAccel(imu.ay), imu.calcAccel(imu.az),
-                imu.calcGyro(imu.gx), imu.calcGyro(imu.gy), imu.calcGyro(imu.gz),
-                imu.calcMag(imu.mx), imu.calcMag(imu.my), imu.calcMag(imu.mz),
-                imu.calcQuat(imu.qw), imu.calcQuat(imu.qx), imu.calcQuat(imu.qy), imu.calcQuat(imu.qz), press);*/
-  /*imuLog += String(imu.time) + ", "; // Add time to log string
-  imuLog += String(imu.calcAccel(imu.ax)) + ", ";
-  imuLog += String(imu.calcAccel(imu.ay)) + ", ";
-  imuLog += String(imu.calcAccel(imu.az)) + ", ";
-
-  imuLog += String(imu.calcGyro(imu.gx)) + ", ";
-  imuLog += String(imu.calcGyro(imu.gy)) + ", ";
-  imuLog += String(imu.calcGyro(imu.gz)) + ", ";
-  
-  imuLog += String(imu.calcMag(imu.mx)) + ", ";
-  imuLog += String(imu.calcMag(imu.my)) + ", ";
-  imuLog += String(imu.calcMag(imu.mz)) + ", ";    
-
-  imuLog += String(imu.calcQuat(imu.qw), 4) + ", ";
-  imuLog += String(imu.calcQuat(imu.qx), 4) + ", ";
-  imuLog += String(imu.calcQuat(imu.qy), 4) + ", ";
-  imuLog += String(imu.calcQuat(imu.qz), 4);
-  
-  imuLog += "\n"; // Add a new line*/
-  String imuLog = buff;
-
-  //Populate BoardData object for binary data logging
-  BoardData bd;
-  bd.time = imu.time;
-  bd.accel = (SensorData){.X = imu.ax, .Y = imu.ay, .Z = imu.az};
-  bd.gyro = (SensorData){.X = imu.gx, .Y = imu.gy, .Z = imu.gz};
-  bd.mag = (SensorData){.X = imu.mx, .Y = imu.my, .Z = imu.mz};
-  bd.pressure = 0; //No pressure
-
-  databuffer.write(&bd, 1);
-
   //if (enableSerialLogging)  // If serial port logging is enabled
-  LOG_PORT.print(imuLog); // Print log line to serial port
+  //LOG_PORT.write((uint8_t*)(&bd), sizeof(bd)); // Print log line to serial port
 
   // If SD card logging is enabled & a card is plugged in
+  
   if (sdCardPresent)
   {
-    // If adding this log line will put us over the buffer length:
-    if (imuLog.length() + logFileBuffer.length() >=
-        SD_LOG_WRITE_BUFFER_SIZE)
+    if (databuffer.length() > 0)
     {
-      sdLogString(logFileBuffer); // Log SD buffer
-      logFileBuffer = ""; // Clear SD log buffer 
+      
+      //LOG_PORT.println("Data in the buffer");
+      BoardData temp[30];
+      uint16_t num_read = min(databuffer.length(), 30);
+      databuffer.read(temp, num_read);
+      databuffer.delete_oldest(num_read);
+      sdLogBoardData(temp, num_read); // Log SD buffer
+      //logFileBuffer = ""; // Clear SD log buffer 
       blinkLED(); // Blink LED every time a new buffer is logged to SD
     }
     // Add new line to SD log buffer
-    logFileBuffer += imuLog;
+    //logFileBuffer += imuLog;
   }
   else
   {
@@ -275,16 +414,15 @@ bool initSD(void)
   return true;
 }
 
-// Log a string to the SD card
-bool sdLogString(String toLog)
+bool sdLogBoardData(BoardData* bd, uint16_t count)
 {
-  // Open the current file name:
-  File logFile = SD.open(logFileName, FILE_WRITE);
+  
   
   // If the file will get too big with this new string, create
   // a new one, and open it.
-  if (logFile.size() > (SD_MAX_FILE_SIZE - toLog.length()))
+  if (logFile.size() > (SD_MAX_FILE_SIZE - sizeof(*bd)))
   {
+    logFile.close();
     logFileName = nextLogFile();
     logFile = SD.open(logFileName, FILE_WRITE);
   }
@@ -292,9 +430,14 @@ bool sdLogString(String toLog)
   // If the log file opened properly, add the string to it.
   if (logFile)
   {
-    logFile.print(toLog);
-    logFile.close();
-
+    //https://stackoverflow.com/a/5055648
+    logFile.write(static_cast<uint8_t*>(static_cast<void*>(bd)), sizeof(*bd) * count);
+    //logFile.close();
+    if (last_loop_start - 1000 > lastlooplogged)
+    {
+      lastlooplogged = last_loop_start;
+      logFile.flush();
+    }
     return true; // Return success
   }
 
